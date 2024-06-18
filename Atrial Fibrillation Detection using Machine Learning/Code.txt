@@ -1,0 +1,253 @@
+!pip install wfdb
+import pandas as pd
+import numpy as np
+import wfdb
+import random
+import seaborn as sns
+import tensorflow as tf
+import matplotlib.pyplot as plt
+from sklearn.preprocessing import MinMaxScaler
+from sklearn.model_selection import train_test_split
+from sklearn.preprocessing import MinMaxScaler
+from tensorflow.keras import layers, losses
+from tensorflow.keras.layers import Input, Conv1D, MaxPooling1D,
+BatchNormalization,concatenate,Conv1DTranspose,Dropout
+from tensorflow.keras.optimizers import Adam
+from tensorflow.keras.layers import Activation
+from tensorflow.keras.losses import binary_crossentropy
+from tensorflow.keras.models import Model
+from tensorflow.keras import layers
+from tensorflow.keras.models import Model
+from wfdb import processing
+random.seed(42)
+import warnings
+warnings.filterwarnings("ignore")
+from google.colab import drive
+drive.mount('/content/drive')
+data = '/content/drive/My Drive/Final/atrial-fib/files/'
+def load_ecg(file,filetype):
+record = wfdb.rdrecord(file)
+annotation = wfdb.rdann(file, filetype)
+p_signal = record.p_signal
+atr_sym = annotation.symbol
+atr_sample = annotation.sample
+return p_signal, atr_sym, atr_sample
+def af_data(qrs_sample,atr_sample):
+AF_samples_array = []
+NonAF_samples_array = []
+for i in range (len(atr_sample)):
+if (i % 2 == 0) & (i < len(atr_sample)-1) :
+NonAF_samples = qrs_sample[( qrs_sample >= atr_sample[i] ) &
+(qrs_sample < atr_sample[i+1]) ]
+NonAF_samples_array.append(NonAF_samples)
+if (i % 2 == 1) & (i < len(atr_sample)-1) :
+AF_samples = qrs_sample[(qrs_sample >= atr_sample[i] ) &
+(qrs_sample < atr_sample[i+1]) ]
+AF_samples_array.append(AF_samples)
+if (i % 2 == 0) & (i == len(atr_sample)-1) :
+NonAF_samples = qrs_sample [ qrs_sample > atr_sample[i] ]
+NonAF_samples_array.append(NonAF_samples)
+if (i % 2 == 1) & (i == len(atr_sample)-1) :
+AF_samples = qrs_sample [ qrs_sample > atr_sample[i] ]
+AF_samples_array.append(AF_samples)
+return
+np.array(AF_samples_array,dtype='object'),np.array(NonAF_samples_array,dty
+pe='object')
+patients=['04015','04048','04126','04746','04908','04936','05091','05261','06453','
+06995']
+y_128 = []
+X_array_128 = []
+for pt in patients:
+file = data + pt
+p_signal, atr_sym, atr_sample = load_ecg(file,'atr')
+p_signal, qrs_sym, qrs_sample = load_ecg(file,'qrs')
+AF_samples_array, NonAF_samples_array = af_data(qrs_sample,atr_sample)
+if not (pt == '07162' or pt == '07859'):
+AF_samples_array = np.concatenate(AF_samples_array,axis=0)
+NonAF_samples_array = np.concatenate(NonAF_samples_array,axis=0)
+totalsamples =
+np.concatenate((AF_samples_array,NonAF_samples_array),axis=0)
+p_signal = p_signal[:,0]
+for i in range (1,np.size(totalsamples)-3,1):
+if totalsamples[i]>= 750:
+if (totalsamples[i] in AF_samples_array):
+X = p_signal[(totalsamples[i]-64):(totalsamples[i]+64)]
+X_array_128.append(X)
+y_128.append(np.ones((128,)))
+if totalsamples[i]>= 750:
+if (totalsamples[i] in NonAF_samples_array):
+X = p_signal[(totalsamples[i]-64):(totalsamples[i]+64)]
+X_array_128.append(X)
+y_128.append(np.zeros((128,)))
+p_signal.shape
+print(np.array(X_array_128).shape)
+print(np.array(y_128).shape)
+plt.figure(figsize=(20, 9))
+plt.grid()
+plt.plot(X_array_128[50] ,color='r')
+plt.plot(y_128[50],color='b')
+plt.show()
+X_array_128 =
+np.array(X_array_128).reshape((np.array(X_array_128).shape[0],128,1))
+y_128 = np.array(y_128).reshape((np.array(y_128).shape[0],128,1))
+X_train, X_valid, y_train, y_valid = train_test_split(X_array_128, y_128,
+test_size=0.4, random_state=42)
+X_valid, X_test, y_valid, y_test = train_test_split(X_valid, y_valid,
+test_size=0.5, random_state=42)
+print(X_train.shape)
+print(X_valid.shape)
+print(X_test.shape)
+print(y_train.shape)
+print(y_valid.shape)
+print(y_test.shape)
+def build_unet_model():
+inputs = tf.keras.layers.Input((128, 1))
+c1 = tf.keras.layers.Conv1D(16, (3), activation='relu',
+kernel_initializer='he_normal', padding='same')(inputs)
+c1 = tf.keras.layers.Dropout(0.1)(c1)
+c1 = tf.keras.layers.Conv1D(16, (3), activation='relu',
+kernel_initializer='he_normal', padding='same')(c1)
+p1 = tf.keras.layers.MaxPooling1D(pool_size=(2))(c1)
+c2 = tf.keras.layers.Conv1D(32, (3), activation='relu',
+kernel_initializer='he_normal', padding='same')(p1)
+c2 = tf.keras.layers.Dropout(0.1)(c2)
+c2 = tf.keras.layers.Conv1D(32, (3), activation='relu',
+kernel_initializer='he_normal', padding='same')(c2)
+p2 = tf.keras.layers.MaxPooling1D(pool_size=(2))(c2)
+c3 = tf.keras.layers.Conv1D(64, (3), activation='relu',
+kernel_initializer='he_normal', padding='same')(p2)
+c3 = tf.keras.layers.Dropout(0.2)(c3)
+c3 = tf.keras.layers.Conv1D(64, (3), activation='relu',
+kernel_initializer='he_normal', padding='same')(c3)
+p3 = tf.keras.layers.MaxPooling1D(pool_size=(2))(c3)
+c4 = tf.keras.layers.Conv1D(128, (3), activation='relu',
+kernel_initializer='he_normal', padding='same')(p3)
+c4 = tf.keras.layers.Dropout(0.2)(c4)
+c4 = tf.keras.layers.Conv1D(128, (3), activation='relu',
+kernel_initializer='he_normal', padding='same')(c4)
+p4 = tf.keras.layers.MaxPooling1D(pool_size=(2))(c4)
+c5 = tf.keras.layers.Conv1D(128, (3), activation='relu',
+kernel_initializer='he_normal', padding='same')(p4)
+c5 = tf.keras.layers.Dropout(0.3)(c5)
+c5 = tf.keras.layers.Conv1D(128, (3), activation='relu',
+kernel_initializer='he_normal', padding='same')(c5)
+u6 = tf.keras.layers.Conv1DTranspose(128, (2), strides=(2),
+padding='same')(c5)
+u6 = tf.keras.layers.concatenate([u6, c4])
+c6 = tf.keras.layers.Conv1D(128, (3), activation='relu',
+kernel_initializer='he_normal', padding='same')(u6)
+c6 = tf.keras.layers.Dropout(0.2)(c6)
+c6 = tf.keras.layers.Conv1D(128, (3), activation='relu',
+kernel_initializer='he_normal', padding='same')(c6)
+u7 = tf.keras.layers.Conv1DTranspose(64, (2), strides=(2),
+padding='same')(c6)
+u7 = tf.keras.layers.concatenate([u7, c3])
+c7 = tf.keras.layers.Conv1D(64, (3), activation='relu',
+kernel_initializer='he_normal', padding='same')(u7)
+c7 = tf.keras.layers.Dropout(0.2)(c7)
+c7 = tf.keras.layers.Conv1D(64, (3), activation='relu',
+kernel_initializer='he_normal', padding='same')(c7)
+u8 = tf.keras.layers.Conv1DTranspose(32, (2), strides=(2),
+padding='same')(c7)
+u8 = tf.keras.layers.concatenate([u8, c2])
+c8 = tf.keras.layers.Conv1D(32, (3), activation='relu',
+kernel_initializer='he_normal', padding='same')(u8)
+c8 = tf.keras.layers.Dropout(0.1)(c8)
+c8 = tf.keras.layers.Conv1D(32, (3), activation='relu',
+kernel_initializer='he_normal', padding='same')(c8)
+u9 = tf.keras.layers.Conv1DTranspose(16, (2), strides=(2),
+padding='same')(c8)
+u9 = tf.keras.layers.concatenate([u9, c1])
+c9 = tf.keras.layers.Conv1D(16, (3), activation='relu',
+kernel_initializer='he_normal', padding='same')(u9)
+c9 = tf.keras.layers.Dropout(0.1)(c9)
+c9 = tf.keras.layers.Conv1D(16, (3), activation='relu',
+kernel_initializer='he_normal', padding='same')(c9)
+outputs = tf.keras.layers.Conv1D(1, (1), activation='sigmoid')(c9)
+unet_model = tf.keras.Model(inputs, outputs, name="U-Net")
+return unet_model
+unet_model = build_unet_model()
+unet_model.summary()
+unet_model.compile(loss = 'mean_squared_error',optimizer =
+'adam',metrics='binary_accuracy')
+callback = tf.keras.callbacks.EarlyStopping(monitor='val_loss', patience=10)
+history = unet_model.fit(X_train, y_train,
+epochs=10,
+batch_size=64,
+validation_data=(X_valid,y_valid),
+shuffle=True,verbose=1,
+callbacks=[callback])
+unet_model.save("atrialfib.h5")
+from pydrive.auth import GoogleAuth
+from pydrive.drive import GoogleDrive
+from google.colab import auth
+from oauth2client.client import GoogleCredentials
+auth.authenticate_user()
+gauth = GoogleAuth()
+gauth.credentials = GoogleCredentials.get_application_default()
+drive = GoogleDrive(gauth)
+folder_id = None
+file_list = drive.ListFile({'q': "'root' in parents and trashed=false"}).GetList()
+for file in file_list:
+if file['title'] == 'unet_model' and file['mimeType'] ==
+'application/vnd.google-apps.folder':
+folder_id = file['id']
+break
+if folder_id:
+model_file = drive.CreateFile({'title': 'atrialfib.h5', 'parents': [{'id':
+folder_id}]})
+model_file.SetContentFile('atrialfib.h5')
+model_file.Upload()
+print("Model saved to 'unet_model' folder in Google Drive.")
+else:
+print("Folder 'unet_model' not found in Google Drive.")
+plt.plot(history.history['binary_accuracy'], 'r', label='Training accuracy')
+plt.plot(history.history['val_binary_accuracy'], 'b', label='Training accuracy')
+plt.title('Training Vs Validation Accuracy')
+plt.xlabel('No. of Epochs')
+plt.ylabel('Accuracy')
+plt.legend()
+plt.show()
+plt.plot(history.history['loss'], 'r', label='Training loss')
+plt.plot(history.history['val_loss'], 'b', label='Validation loss')
+plt.title('Training vs Validation Loss')
+plt.xlabel('No. of Epochs')
+plt.ylabel('Loss')
+plt.legend()
+plt.show()
+pred = unet_model.predict(X_test)
+pred = (pred > 0.5).astype(np.uint8).astype(int)
+preds = []
+test = []
+for i in pred:
+if 0 in i:
+preds.append(np.zeros((1)))
+else:
+preds.append(np.ones((1)))
+for i in y_test:
+if 0 in i:
+test.append(np.zeros((1)))
+else:
+test.append(np.ones((1)))
+TN = sum(1 for pred, actual in zip(preds, test) if pred == 0 and actual == 0)
+FP = sum(1 for pred, actual in zip(preds, test) if pred == 1 and actual == 0)
+specificity = TN / (TN + FP)
+print("Specificity:", specificity)
+from sklearn import metrics
+from sklearn.metrics import confusion_matrix
+CLASS_LABELS = ['Normal', 'Atrial Fibrillation']
+cm_data = confusion_matrix(test, preds)
+cm = pd.DataFrame(cm_data, columns=CLASS_LABELS, index =CLASS_LABELS)
+
+cm.index.name = 'Actual'
+cm.columns.name = 'Predicted'
+plt.figure(figsize = (5,5))
+plt.title('Confusion Matrix', fontsize = 20)
+sns.set(font_scale=1.2)
+ax = sns.heatmap(cm, cbar=False, cmap="Blues", annot=True,
+annot_kws={"size": 16}, fmt='g')
+print('Accuracy:', np.round(metrics.accuracy_score(test, preds),3)*100,'%')
+print('Precision:', np.round(metrics.precision_score(test, preds,
+average='weighted'),3))
+print('Recall:', np.round(metrics.recall_score(test, preds, average='weighted'),3))
+print('F1 Score:', np.round(metrics.f1_score(test, preds, average='weighted'),3))
